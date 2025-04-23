@@ -50,6 +50,26 @@ const Receiver: FC<{
     };
   }, [type, id]);
 
+  const endCall = useCallback(() => {
+    if (call) {
+      call.close();
+      setCall(null);
+    }
+
+    if (incomingCall) {
+      incomingCall.close();
+      setIncomingCall(null);
+    }
+
+    if (localVideoRef.current?.srcObject) {
+      const tracks = (localVideoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach(track => track.stop());
+      localVideoRef.current.srcObject = null;
+    }
+
+    setStatus('Ready for calls');
+  }, [call, incomingCall]);
+
   const handleIncomingCall = useCallback(async () => {
     if (!incomingCall) return;
 
@@ -80,27 +100,7 @@ const Receiver: FC<{
       console.error('Error answering call:', err);
       setStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  }, [incomingCall]);
-
-  const endCall = useCallback(() => {
-    if (call) {
-      call.close();
-      setCall(null);
-    }
-
-    if (incomingCall) {
-      incomingCall.close();
-      setIncomingCall(null);
-    }
-
-    if (localVideoRef.current?.srcObject) {
-      const tracks = (localVideoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach(track => track.stop());
-      localVideoRef.current.srcObject = null;
-    }
-
-    setStatus('Ready for calls');
-  }, [call, incomingCall]);
+  }, [incomingCall, endCall]);
 
   return (
     <Box sx={{ p: 3, maxWidth: 800, margin: '0 auto' }}>

@@ -82,6 +82,20 @@ useEffect(() => {
 
   console.log(toBeCalled, receiverId)
 }, [receiverId, toBeCalled, window.location.pathname])
+  const endCall = () => {
+    if (call) {
+      call.close();
+      setCall(null);
+    }
+    if (remoteVideoRef.current?.srcObject) {
+      const tracks = (remoteVideoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach((track: MediaStreamTrack) => track.stop());
+      remoteVideoRef.current.srcObject = null;
+      window.location.reload();
+    }
+    setStatus('Ready to call');
+  };
+
   const startCall = useCallback(async () => {
     if (!peer) return;
     setStatus('Calling...');
@@ -113,24 +127,7 @@ useEffect(() => {
       console.error('Error starting call:', err);
       setStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  }, [peer, toBeCalled]);
-
-  const endCall = () => {
-    if (call) {
-      call.close();
-      setCall(null);
-    }
-    if (remoteVideoRef.current?.srcObject) {
-      const tracks = (remoteVideoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach((track: MediaStreamTrack) => track.stop());
-      remoteVideoRef.current.srcObject = null;
-      window.location.reload();
-    }
-    setStatus('Ready to call');
-  };
-
-
- 
+  }, [peer, toBeCalled, endCall]);
 
   return (
     <Box sx={{ p: 3, maxWidth: 800, margin: '0 auto' }}>
