@@ -1,0 +1,8 @@
+[
+    { "name": "Reporting", "assignedTo": 1 },
+    { "name": "Reporting", "assignedTo": 2 },
+    { "name": "Complaints services", "assignedTo": 3 },
+    { "name": "Complaints services", "assignedTo": 4 },
+    { "name": "Inquiries services", "assignedTo": 5 },
+    { "name": "Inquiries services", "assignedTo": 6 }
+  ]
