@@ -123,15 +123,9 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
             ))}
         </Select>
 
-        {call ? (
-          <Button variant="contained" onClick={cleanup}>
-            End Call
-          </Button>
-        ) : (
-          <Button variant="contained" onClick={startCall} disabled={!peer}>
-            Start Call
-          </Button>
-        )}
+        <Button variant="contained" onClick={startCall} disabled={!peer || !!call}>
+          Start Call
+        </Button>
       </Box>
 
       <Typography sx={{ mt: 2 }}>Status: {status}</Typography>
