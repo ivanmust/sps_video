@@ -93,62 +93,48 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
 
   return (
     <Box sx={{ p: 3, maxWidth: 800, margin: '0 auto' }}>
-      <Typography variant="h4" gutterBottom>
-        KIOSK {kioskId}
-      </Typography>
+    <Typography variant="h4" gutterBottom>
+      KIOSK {kioskId}
+    </Typography>
 
-      <video
-        ref={remoteVideoRef}
-        autoPlay
-        playsInline
-        style={{
-          width: '100%',
-          maxHeight: '30vh',
-          backgroundImage: `url("/logo.png")`,
-          borderRadius: 8,
-          backgroundSize: 'contain',
-          backgroundRepeat: 'no-repeat',
-          backgroundPosition: 'center',
-        }}
-      />
+    <video
+      ref={remoteVideoRef}
+      autoPlay
+      playsInline
+      style={{
+        width: '100%',
+        maxHeight: '30vh',
+        backgroundImage: `url("/logo.png")`,
+        borderRadius: 8,
+        backgroundSize: 'contain',
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'center',
+      }}
+    />
 
-      <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
-        <Select
-          value={receiverId ?? ''}
-          onChange={(e) => setReceiverId(Number(e.target.value))}
-          sx={{ minWidth: 120 }}
-        >
-          {cases
-            .filter((c) => allowedReceivers.includes(c.assignedTo))
-            .map((c) => (
-              <MenuItem value={c.assignedTo} key={c.name}>
-                Officer {c.name}
-              </MenuItem>
-            ))}
-        </Select>
+    <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+      <Select
+        value={receiverId ?? ''}
+        onChange={(e) => setReceiverId(Number(e.target.value))}
+        sx={{ minWidth: 120 }}
+      >
+        {cases
+          .filter((c) => allowedReceivers.includes(c.assignedTo))
+          .map((c) => (
+            <MenuItem value={c.assignedTo} key={c.name}>
+              Officer {c.name}
+            </MenuItem>
+          ))}
+      </Select>
 
-        <Button variant="contained" onClick={startCall}>
-          Start Call
-        </Button>
-      </Box>
-
-      <Typography sx={{ mt: 2 }}>Status: {status}</Typography>
-
-      <video
-        ref={localVideoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{
-          width: '100%',
-          maxHeight: '20vh',
-          marginTop: '20px',
-          borderRadius: 8,
-          objectFit: 'cover',
-        }}
-      />
+      <Button variant="contained" onClick={startCall}>
+        Start Call
+      </Button>
     </Box>
-  );
+
+    <Typography sx={{ mt: 2 }}>Status: {status}</Typography>
+  </Box>
+);
 };
 
 export default Caller;
