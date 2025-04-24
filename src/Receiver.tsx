@@ -119,10 +119,6 @@ const Receiver: React.FC<ReceiverProps> = ({ id, caseItem }) => {
 
       <Box mt={2} display="flex" gap={2}>
         <Box>
-          <Typography variant="subtitle2">Local Video</Typography>
-          <video ref={localVideoRef} autoPlay muted playsInline style={{ width: '300px' }} />
-        </Box>
-        <Box>
           <Typography variant="subtitle2">Remote Video</Typography>
           <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '300px' }} />
         </Box>
