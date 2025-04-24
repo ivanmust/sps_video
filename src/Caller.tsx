@@ -1,23 +1,14 @@
 import { useState, useEffect, useRef, FC, useCallback } from 'react';
 import { Button, Select, MenuItem, Box, Typography } from '@mui/material';
-import Peer, { MediaConnection } from 'peerjs';
+import Peer from 'peerjs';
 
-const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }) => {
+const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: number }> = ({ cases, kioskId }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
-  const [call, setCall] = useState<MediaConnection | null>(null);
   const [status, setStatus] = useState('Connecting...');
   const [receiverId, setReceiverId] = useState<number | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-
-  // Replace this with your logic to determine the kiosk ID
-  const kioskId = 1; // Example: 1 or 2
-
-  const allowedReceivers: { [key: number]: number[] } = {
-    1: [1, 3, 5],
-    2: [2, 4, 6],
-  };
 
   useEffect(() => {
     const newPeer = new Peer(`caller-${Math.random().toString(36).substr(2, 9)}`, {
@@ -42,8 +33,14 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
     };
   }, []);
 
+  const allowedReceivers = kioskId === 1 ? [1, 3, 5] : kioskId === 2 ? [2, 4, 6] : [];
+
   const startCall = useCallback(async () => {
-    if (!peer || receiverId === null) return;
+    if (!peer || receiverId === null) {
+      setStatus('Cannot call: Peer not ready or no receiver selected.');
+      return;
+    }
+
     setStatus('Calling...');
 
     try {
@@ -73,7 +70,6 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
         cleanup();
       });
 
-      setCall(newCall);
     } catch (err: unknown) {
       console.error('Error starting call:', err);
       setStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -93,10 +89,7 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
     if (localVideoRef.current?.srcObject) {
       localVideoRef.current.srcObject = null;
     }
-    setCall(null);
   };
-
-  const filteredCases = cases.filter((c) => allowedReceivers[kioskId]?.includes(c.assignedTo));
 
   return (
     <Box sx={{ p: 3, maxWidth: 800, margin: '0 auto' }}>
@@ -122,26 +115,38 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
       <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
         <Select
           value={receiverId ?? ''}
-          onChange={(e) => setReceiverId(+e.target.value)}
+          onChange={(e) => setReceiverId(Number(e.target.value))}
           sx={{ minWidth: 120 }}
-          displayEmpty
         >
-          <MenuItem value="" disabled>
-            Select Officer
-          </MenuItem>
-          {filteredCases.map((c) => (
-            <MenuItem value={c.assignedTo} key={c.assignedTo}>
-              Officer {c.name}
-            </MenuItem>
-          ))}
+          {cases
+            .filter((c) => allowedReceivers.includes(c.assignedTo))
+            .map((c) => (
+              <MenuItem value={c.assignedTo} key={c.name}>
+                Officer {c.name}
+              </MenuItem>
+            ))}
         </Select>
 
-        <Button variant="contained" onClick={startCall} disabled={!peer || !!call || receiverId === null}>
+        <Button variant="contained" onClick={startCall}>
           Start Call
         </Button>
       </Box>
 
       <Typography sx={{ mt: 2 }}>Status: {status}</Typography>
+
+      <video
+        ref={localVideoRef}
+        autoPlay
+        muted
+        playsInline
+        style={{
+          width: '100%',
+          maxHeight: '20vh',
+          marginTop: '20px',
+          borderRadius: 8,
+          objectFit: 'cover',
+        }}
+      />
     </Box>
   );
 };

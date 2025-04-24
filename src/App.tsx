@@ -38,7 +38,7 @@ function App() {
           <Route
             key={`caller-${index}`}
             path={`/call/${index + 1}`}
-            element={<Caller cases={cases} />}
+            element={<Caller cases={cases} kioskId={index + 1} />}
           />
         ))}
         {cases.map((caseItem, index) => (
