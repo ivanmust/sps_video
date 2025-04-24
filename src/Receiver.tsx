@@ -91,7 +91,7 @@ const Receiver: React.FC<ReceiverProps> = ({ id, caseItem }) => {
     if (currentCall) {
       currentCall.close();
     }
-    setStatus('Call ended by receiver');
+    setStatus('Call ended by Officer');
     cleanup();
   };
 
@@ -114,7 +114,7 @@ const Receiver: React.FC<ReceiverProps> = ({ id, caseItem }) => {
 
   return (
     <Box p={2}>
-      <Typography variant="h6">Receiver - {caseItem.name}</Typography>
+      <Typography variant="h6">Officer - {caseItem.name}</Typography>
       <Typography>Status: {status}</Typography>
 
       <Box mt={2} display="flex" gap={2}>

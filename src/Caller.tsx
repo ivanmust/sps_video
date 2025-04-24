@@ -6,10 +6,18 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
   const [peer, setPeer] = useState<Peer | null>(null);
   const [call, setCall] = useState<MediaConnection | null>(null);
   const [status, setStatus] = useState('Connecting...');
-  const [receiverId, setReceiverId] = useState(1);
+  const [receiverId, setReceiverId] = useState<number | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+
+  // Replace this with your logic to determine the kiosk ID
+  const kioskId = 1; // Example: 1 or 2
+
+  const allowedReceivers: { [key: number]: number[] } = {
+    1: [1, 3, 5],
+    2: [2, 4, 6],
+  };
 
   useEffect(() => {
     const newPeer = new Peer(`caller-${Math.random().toString(36).substr(2, 9)}`, {
@@ -35,7 +43,7 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
   }, []);
 
   const startCall = useCallback(async () => {
-    if (!peer) return;
+    if (!peer || receiverId === null) return;
     setStatus('Calling...');
 
     try {
@@ -88,10 +96,12 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
     setCall(null);
   };
 
+  const filteredCases = cases.filter((c) => allowedReceivers[kioskId]?.includes(c.assignedTo));
+
   return (
     <Box sx={{ p: 3, maxWidth: 800, margin: '0 auto' }}>
       <Typography variant="h4" gutterBottom>
-        KIOSK 
+        KIOSK {kioskId}
       </Typography>
 
       <video
@@ -111,25 +121,22 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[] }> = ({ cases }
 
       <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
         <Select
-          value={receiverId}
+          value={receiverId ?? ''}
           onChange={(e) => setReceiverId(+e.target.value)}
           sx={{ minWidth: 120 }}
+          displayEmpty
         >
-          {(() => {
-            const uniqueTypes = new Set(cases.map((item) => item.name));
-            return Array.from(uniqueTypes).map((type) => {
-              const foundCase = cases.find((c) => c.name === type);
-              if (!foundCase) return null;
-              return (
-                <MenuItem value={foundCase.assignedTo} key={type}>
-                  Officer {type}
-                </MenuItem>
-              );
-            });
-          })()}
+          <MenuItem value="" disabled>
+            Select Officer
+          </MenuItem>
+          {filteredCases.map((c) => (
+            <MenuItem value={c.assignedTo} key={c.assignedTo}>
+              Officer {c.name}
+            </MenuItem>
+          ))}
         </Select>
 
-        <Button variant="contained" onClick={startCall} disabled={!peer || !!call}>
+        <Button variant="contained" onClick={startCall} disabled={!peer || !!call || receiverId === null}>
           Start Call
         </Button>
       </Box>
