@@ -204,16 +204,16 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
         </Box>
       </Box>
 
-      {/* Main Content Area */}
-      <Box sx={{ 
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        p: 3,
-        position: 'relative'
+     {/* Main Content - Video Area */}
+     <Box sx={{ 
+        flex: 1, 
+        display: 'flex', 
+        p: { xs: 1, sm: 1.5, md: 2 }, 
+        position: 'relative', 
+        bgcolor: '#1e293b', 
+        height: 'calc(100vh - 50px)' // Adjusted based on header height
       }}>
+      
         {/* Video Container */}
         <Box sx={{
           width: '100%',
@@ -282,7 +282,7 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
               left: 0, 
               width: '100%', 
               height: '100%', 
-              objectFit: 'cover', 
+              objectFit: 'contain', 
               display: currentCall ? 'block' : 'none'
             }} 
           />
