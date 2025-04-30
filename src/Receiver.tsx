@@ -1,76 +1,72 @@
 import { useState, useEffect, useRef, FC, useCallback } from 'react';
-import { Button, Box, Typography, Paper, Stack } from '@mui/material';
+import { Box, Typography, Snackbar, Alert, Button } from '@mui/material';
 import Peer, { MediaConnection } from 'peerjs';
-import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff } from 'lucide-react';
 
-interface ReceiverProps {
+interface OfficerProps {
   id: number;
-  caseItem: { name: string; assignedTo: number };
+  name?: string;
+  rank?: string;
+  caseItem?: {
+    name: string;
+    assignedTo: number;
+  };
 }
 
-const Receiver: FC<ReceiverProps> = ({ id, caseItem }) => {
-  const [status, setStatus] = useState('Initializing...');
+const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem: _caseItem }) => {
+  const [status, setStatus] = useState('Ready - Waiting for incoming calls');
+  const [toast, setToast] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({ 
+    open: false, 
+    message: '',  
+    severity: 'info' 
+  });
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [currentCall, setCurrentCall] = useState<MediaConnection | null>(null);
   const [incomingCall, setIncomingCall] = useState<MediaConnection | null>(null);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
-  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const controlsRef = useRef<HTMLDivElement>(null);
+  const peerRef = useRef<Peer | null>(null);
+  const [callDuration, setCallDuration] = useState(0); // New: call duration in seconds
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null); // New: interval reference
 
   useEffect(() => {
     const peerId = `officer-${id}`;
-    const newPeer = new Peer(peerId, {
+    const peer = new Peer(peerId, {
       host: 'esrirw.rw',
       port: 9000,
       path: '/peerjs',
       secure: true,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      },
     });
 
-    newPeer.on('open', () => {
-      setStatus(`Ready to receive call (ID: ${peerId})`);
+    peerRef.current = peer;
+
+    peer.on('open', () => {
+      console.log('PeerJS Connected:', peerId);
+      setStatus('Online - Waiting for incoming calls');
+      setToast({ open: true, message: 'Connected to PeerJS server ✅', severity: 'success' });
     });
 
-    newPeer.on('call', (call) => {
-      setStatus('Incoming call...');
-      setIncomingCall(call);
+    peer.on('call', (incoming) => {
+      console.log('Incoming call detected!');
+      setIncomingCall(incoming);
+      setStatus('Incoming call from kiosk...');
     });
 
-    newPeer.on('error', (err) => {
+    peer.on('error', (err) => {
       console.error('PeerJS error:', err);
-      setStatus(`Error: ${err.type}`);
+      setStatus(`PeerJS error: ${err.type}`);
+      setToast({ open: true, message: `PeerJS error: ${err.type}`, severity: 'error' });
     });
 
     return () => {
-      if (currentCall) {
-        currentCall.close();
-      }
-      if (localStream) {
-        localStream.getTracks().forEach((track) => track.stop());
-      }
-      newPeer.destroy();
+      peer.destroy();
+      cleanup();
     };
   }, [id]);
-
-  // Ensure controls are always visible
-  useEffect(() => {
-    const checkControlsVisibility = () => {
-      if (controlsRef.current) {
-        const rect = controlsRef.current.getBoundingClientRect();
-        const isVisible = rect.top < window.innerHeight && rect.bottom > 0;
-        
-        if (!isVisible) {
-          controlsRef.current.style.bottom = "16px";
-          controlsRef.current.style.position = "fixed";
-        }
-      }
-    };
-    
-    window.addEventListener('resize', checkControlsVisibility);
-    checkControlsVisibility();
-    
-    return () => window.removeEventListener('resize', checkControlsVisibility);
-  }, []);
 
   const acceptCall = useCallback(async () => {
     if (!incomingCall) return;
@@ -82,285 +78,309 @@ const Receiver: FC<ReceiverProps> = ({ id, caseItem }) => {
       incomingCall.answer(stream);
       setCurrentCall(incomingCall);
       setIncomingCall(null);
-      setStatus('Call accepted');
+      setStatus('Call connected');
+      setCallDuration(0); // Reset timer
+
+      // Start call timer
+      callTimerRef.current = setInterval(() => {
+        setCallDuration((prev) => prev + 1);
+      }, 1000);
 
       incomingCall.on('stream', (remoteStream: MediaStream) => {
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = remoteStream;
+          setStatus('Call connected');
+          setToast({ open: true, message: 'Call connected ✅', severity: 'success' });
         }
-        setStatus('Call connected');
       });
 
       incomingCall.on('close', () => {
+        console.log('Call closed by remote kiosk.');
         setStatus('Call ended');
+        setToast({ open: true, message: 'Call ended 📞', severity: 'info' });
         cleanup();
       });
 
       incomingCall.on('error', (err: Error) => {
         console.error('Call error:', err);
         setStatus(`Call error: ${err.message}`);
+        setToast({ open: true, message: `Call error: ${err.message}`, severity: 'error' });
         cleanup();
       });
+
     } catch (err: unknown) {
-      console.error('Media error:', err);
-      setStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('Failed to open camera/microphone:', err);
+      setStatus('Error accessing media devices');
+      setToast({ open: true, message: 'Failed to access camera/microphone ❌', severity: 'error' });
     }
   }, [incomingCall]);
 
+  
+
+  const endCall = () => {
+    setStatus('Call ended');
+    setToast({ open: true, message: 'Call ended', severity: 'info' });
+    cleanup();
+  };
+
   const cleanup = () => {
+    if (currentCall) {
+      currentCall.close();
+    }
     if (remoteVideoRef.current?.srcObject) {
-      const tracks = (remoteVideoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach((track: MediaStreamTrack) => track.stop());
+      const remoteStream = remoteVideoRef.current.srcObject as MediaStream;
+      remoteStream.getTracks().forEach((track) => track.stop());
       remoteVideoRef.current.srcObject = null;
     }
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
       setLocalStream(null);
     }
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    
     setCurrentCall(null);
     setIncomingCall(null);
+    setCallDuration(0); // Reset call duration when cleaning up
+    setStatus('Online - Waiting for incoming calls');
   };
 
-  const toggleVideo = useCallback(() => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach(track => {
-        track.enabled = !isVideoEnabled;
-      });
-      setIsVideoEnabled(!isVideoEnabled);
-    }
-  }, [localStream, isVideoEnabled]);
-
-  const toggleAudio = useCallback(() => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-        track.enabled = !isAudioEnabled;
-      });
-      setIsAudioEnabled(!isAudioEnabled);
-    }
-  }, [localStream, isAudioEnabled]);
+  // Helper to format seconds into MM:SS
+  function formatCallDuration(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  }
 
   return (
-    <Box
-      sx={{
-        height: '100%',
-        minHeight: '100vh',
-        width: '100%',
+    <Box sx={{ 
+      height: '100vh', 
+      width: '100vw', 
+      backgroundColor: '#0a192f', 
+      position: 'relative', 
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column'
+    }}>
+      {/* Header */}
+      <Box sx={{
+        p: 2,
+        bgcolor: '#0f172a',
+        borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box component="img" 
+            src="/logo.png" 
+            alt="Logo" 
+            sx={{ 
+              height: '32px', 
+              width: 'auto', 
+              borderRadius: '50%',
+              bgcolor: '#1e293b'
+            }} 
+          />
+          <Box>
+            <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
+              OFFICER RECEIVER
+            </Typography>
+            <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+              Status: {status}
+            </Typography>
+          </Box>
+        </Box>
+        
+        <Box sx={{ textAlign: 'right' }}>
+          <Typography variant="body1" sx={{ color: '#ffffff', fontWeight: 500 }}>
+            {name}
+          </Typography>
+          <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+            {rank} • ID #{id}
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Main Content Area */}
+      <Box sx={{ 
+        flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        bgcolor: '#1e293b',
-        color: 'white',
-        overflow: 'hidden',
-        position: 'relative',
-      }}
-    >
-      {/* Header */}
-      <Paper
-        elevation={3}
-        sx={{
-          p: { xs: 1.5, sm: 2, md: 3 },
-          bgcolor: '#0f172a',
-          borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: { xs: 1, sm: 2 },
-          zIndex: 10,
-        }}
-      >
-        <Box
-          component="img"
-          src="/logo.png" 
-          alt="Logo" 
-          sx={{ 
-            height: { xs: '24px', sm: '30px', md: '40px' },
-            width: 'auto',
-          }}
-        />
-        <Box>
-          <Typography 
-            variant="h5" 
-            sx={{ 
-              color: '#ffffff', 
-              fontWeight: 600,
-              fontSize: { xs: '1rem', sm: '1.2rem', md: '1.5rem' }
-            }}
-          >
-            OFFICER {caseItem.name}
-          </Typography>
-          <Typography 
-            variant="body2"
-            sx={{ 
-              color: status.includes('Error') ? '#ef4444' : 
-                     status.includes('Connected') ? '#10b981' : '#94a3b8',
-              fontSize: { xs: '0.7rem', sm: '0.75rem', md: '0.875rem' }
-            }}
-          >
-            Status: {status}
-          </Typography>
-        </Box>
-      </Paper>
-
-      {/* Main Content */}
-      <Box
-        sx={{
-          flex: 1,
-          display: 'flex',
-          p: { xs: 1, sm: 2, md: 3 },
+        justifyContent: 'center',
+        alignItems: 'center',
+        p: 3,
+        position: 'relative'
+      }}>
+        {/* Video Container */}
+        <Box sx={{
+          width: '100%',
+          height: '100%',
+          overflow: 'hidden',
+          borderRadius: 2,
           position: 'relative',
-          bgcolor: '#1e293b',
-          height: { xs: 'calc(100vh - 60px)', sm: 'calc(100vh - 72px)', md: 'calc(100vh - 88px)' },
-        }}
-      >
-        {/* Remote Video - Made more responsive */}
-        <Box
-          sx={{
-            flex: 1,
-            position: 'relative',
-            borderRadius: { xs: 1, sm: 2, md: 3 },
-            overflow: 'hidden',
-            bgcolor: '#0f172a',
-            border: '2px solid rgba(148, 163, 184, 0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100%',
-          }}
-        >
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-            }}
-          />
-          {/* Logo overlay when no video */}
+          bgcolor: '#0f172a',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}>
           {!currentCall && !incomingCall && (
-            <Box
-              sx={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                textAlign: 'center',
-                width: '90%',
-              }}
-            >
-              <Box
+            <>
+              {/* Officer Badge/Logo */}
+              <Box 
                 component="img"
-                src="/logo.png" 
-                alt="Waiting" 
+                src="/logo.png"
+                alt="Officer Badge"
                 sx={{
-                  width: { xs: '80px', sm: '100px', md: '120px' },
-                  height: 'auto',
-                  opacity: 0.5,
-                  marginBottom: { xs: '0.5rem', sm: '1rem' },
+                  width: '120px',
+                  height: '120px',
+                  borderRadius: '50%',
+                  mb: 3
                 }}
               />
-              <Typography 
-                variant="h6" 
-                sx={{ 
-                  color: '#94a3b8',
-                  fontSize: { xs: '0.9rem', sm: '1rem', md: '1.25rem' }
-                }}
-              >
-                Waiting for incoming call
+              
+              <Typography variant="h5" sx={{ color: '#94a3b8', mb: 4 }}>
+                Waiting for incoming calls
               </Typography>
+              
+              <Box sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 4,
+                borderRadius: 2,
+                border: '1px solid rgba(148, 163, 184, 0.2)',
+                width: '100%',
+                maxWidth: '400px',
+                gap: 2
+              }}>
+                <Box sx={{ 
+                  width: '12px', 
+                  height: '12px', 
+                  borderRadius: '50%', 
+                  bgcolor: '#10b981',
+                  animation: 'pulse 2s infinite'
+                }} />
+                <Typography sx={{ color: '#94a3b8' }}>
+                  Your officer ID is <strong style={{ color: '#ffffff' }}>{id}</strong>
+                </Typography>
+              </Box>
+            </>
+          )}
+
+          {/* Video Element (hidden until call) */}
+          <video 
+            ref={remoteVideoRef} 
+            autoPlay 
+            playsInline 
+            style={{ 
+              position: 'absolute', 
+              top: 0, 
+              left: 0, 
+              width: '100%', 
+              height: '100%', 
+              objectFit: 'cover', 
+              display: currentCall ? 'block' : 'none'
+            }} 
+          />
+
+          {/* Incoming Call Controls */}
+          {incomingCall && (
+            <Box sx={{
+              position: 'absolute',
+              bottom: '50%',
+              left: '50%',
+              transform: 'translate(-50%, 50%)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 4,
+              backgroundColor: 'rgba(15, 23, 42, 0.9)',
+              p: 4,
+              borderRadius: 2,
+              width: '90%',
+              maxWidth: '400px'
+            }}>
+              <Typography variant="h5" sx={{ color: '#ffffff' }}>
+                Incoming Call from Kiosk
+              </Typography>
+              
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button
+                  variant="contained"
+                  color="success"
+                  onClick={acceptCall}
+                  sx={{ px: 4, py: 1.5 }}
+                >
+                  Accept
+                </Button>
+                
+              </Box>
             </Box>
           )}
-        </Box>
 
-        {/* Controls - Made more responsive */}
-        <Stack
-          ref={controlsRef}
-          direction={{ xs: 'column', sm: 'row' }}
-          spacing={{ xs: 1, sm: 2 }}
-          sx={{
-            position: 'absolute',
-            bottom: { xs: '16px', sm: '24px', md: '32px' },
-            left: '50%',
-            transform: 'translateX(-50%)',
-            bgcolor: 'rgba(15, 23, 42, 0.95)',
-            backdropFilter: 'blur(12px)',
-            p: { xs: 1.5, sm: 2 },
-            px: { xs: 2, sm: 3 },
-            borderRadius: { xs: 2, sm: 3 },
-            border: '2px solid rgba(148, 163, 184, 0.2)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
-            width: { xs: 'calc(100% - 32px)', sm: 'auto' },
-            maxWidth: { xs: 'calc(100% - 32px)', sm: '90%', md: '600px' },
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 3,
-          }}
-        >
-          {incomingCall ? (
-            <Button
-              fullWidth
-              variant="contained"
-              onClick={acceptCall}
-              startIcon={<Phone size={20} />}
-              sx={{
-                bgcolor: '#059669',
-                '&:hover': { bgcolor: '#047857' },
-                minWidth: { xs: '100%', sm: '140px', md: '160px' },
-                height: { xs: '40px', sm: '44px', md: '48px' },
-                fontSize: { xs: '0.9rem', sm: '1rem', md: '1.1rem' },
-                fontWeight: 600,
-                boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)',
-              }}
-            >
-              Accept Call
-            </Button>
-          ) : currentCall ? (
-            <Stack 
-              direction="row"
-              spacing={{ xs: 1, sm: 2 }}
-              sx={{ 
-                width: { xs: '100%', sm: 'auto' }, 
-                justifyContent: 'space-between',
-                flexWrap: { xs: 'wrap', sm: 'nowrap' }
-              }}
-            >
-              
-              
+          {/* Active Call Controls */}
+          {currentCall && (
+            <Box sx={{
+              position: 'absolute',
+              bottom: 20,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 2,
+            }}>
+              <Typography sx={{ color: '#ffffff', fontSize: '18px', fontWeight: 'bold' }}>
+                {formatCallDuration(callDuration)}
+              </Typography>
+
               <Button
                 variant="contained"
                 color="error"
-                onClick={cleanup}
-                startIcon={<PhoneOff size={18} />}
-                sx={{
-                  bgcolor: '#dc2626',
-                  '&:hover': { bgcolor: '#b91c1c' },
-                  minWidth: { xs: '100%', sm: '120px', md: '140px' },
-                  height: { xs: '40px', sm: '44px', md: '48px' },
-                  fontSize: { xs: '0.9rem', sm: '1rem', md: '1.1rem' },
-                  fontWeight: 600,
-                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)',
-                  marginTop: { xs: '8px', sm: 0 },
-                  flexBasis: { xs: '100%', sm: 'auto' },
-                }}
+                onClick={endCall}
+                sx={{ px: 4, py: 1.5 }}
               >
                 End Call
               </Button>
-            </Stack>
-          ) : (
-            <Typography 
-              variant="body1" 
-              sx={{ 
-                color: '#94a3b8',
-                py: 1,
-                fontSize: { xs: '0.9rem', sm: '1rem', md: '1.1rem' }
-              }}
-            >
-              Waiting for incoming call...
-            </Typography>
+            </Box>
           )}
-        </Stack>
+        </Box>
       </Box>
+
+      {/* CSS Keyframes for pulsing dot */}
+      <style>
+        {`
+          @keyframes pulse {
+            0% {
+              box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            }
+            70% {
+              box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+            }
+            100% {
+              box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+            }
+          }
+        `}
+      </style>
+
+      {/* Toast Notifications */}
+      <Snackbar 
+        open={toast.open} 
+        autoHideDuration={3000} 
+        onClose={() => setToast((prev) => ({ ...prev, open: false }))} 
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity={toast.severity} sx={{ width: '100%' }}>
+          {toast.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
 
-export default Receiver;
+export default OfficerReceiver;

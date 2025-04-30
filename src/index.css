@@ -147,9 +147,21 @@ button:focus-visible {
 @media (max-width: 768px) {
   .video-container {
     border-radius: 8px;
+    height: auto; /* Adjust height to fit the screen */
   }
   
   button {
     padding: 0.5em 1em;
+  }
+
+  /* Example for responsive text */
+  h1, h2, h3 {
+    font-size: 1.5rem; /* Smaller headings on small screens */
+  }
+
+  /* Example for making layout more fluid */
+  .container {
+    width: 90%; /* Allow container to use more of the screen width */
+    margin: 0 auto;
   }
 }
