@@ -22,10 +22,25 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['react', 'react-dom'],
+    include: [
+      'react', 
+      'react-dom',
+      '@mui/material',
+      '@mui/icons-material',
+      '@emotion/react',
+      '@emotion/styled'
+    ],
   },
   build: {
-    outDir: 'dist'
+    outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          mui: ['@mui/material', '@emotion/react', '@emotion/styled']
+        }
+      }
+    }
   },
   resolve: {
     alias: {
@@ -33,7 +48,6 @@ export default defineConfig({
     }
   },
   base: '/',
-  // 👇 this is the key part for SPA routing
   esbuild: {
     jsxInject: `import React from 'react'`
   }
