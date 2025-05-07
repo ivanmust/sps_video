@@ -2,13 +2,16 @@ import { useState, useEffect, useRef, FC, useCallback } from 'react';
 import { Button, Box, Typography, Paper, Stack } from '@mui/material';
 import Peer, { MediaConnection } from 'peerjs';
 import { Phone } from 'lucide-react';
+import PropTypes from 'prop-types';
+
+
 
 
 const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: number }> = ({ cases, kioskId }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [call, setCall] = useState<MediaConnection | null>(null);
   const [status, setStatus] = useState('Connecting...');
-  const [receiverId, setReceiverId] = useState<number | null>(null);
+  const [, setReceiverId] = useState<number | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isVideoAvailable, setIsVideoAvailable] = useState(false);

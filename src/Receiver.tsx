@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, FC, useCallback } from 'react';
 import { Box, Typography, Snackbar, Alert, Button } from '@mui/material';
 import Peer, { MediaConnection } from 'peerjs';
+import PropTypes from 'prop-types';
 
 interface OfficerProps {
   id: number;

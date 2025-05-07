@@ -10,8 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emotion/cache": "^11.14.0",
+    "@emotion/react": "^11.14.0",
     "@mui/icons-material": "^7.1.0",
     "@mui/material": "^7.1.0",
+    "@mui/styled-engine": "^7.1.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "esbuild": "^0.25.3",
