@@ -335,17 +335,29 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
   }, [incomingCall, localStream, currentKioskId, connectToKiosk]);
 
   const endCall = async () => {
-    setStatus('Call ended by officer');
-    setToast({ open: true, message: 'Call ended', severity: 'info' });
+    // Only proceed if there's actually a call to end
+    if (!currentCall) {
+      console.log('No active call to end');
+      return;
+    }
+    setStatus('Ending call...');
     
     // Send message through data connection if available
     if (dataConnectionRef.current && dataConnectionRef.current.open) {
-      dataConnectionRef.current.send({ 
-        type: 'CALL_END', 
-        timestamp: new Date().toISOString(), 
-        endedBy: 'officer' 
-      });
+      try {
+        dataConnectionRef.current.send({ 
+          type: 'CALL_END', 
+          timestamp: new Date().toISOString(), 
+          endedBy: 'officer' 
+        });
+        console.log('Successfully sent end call notification through data connection');
+      } catch (dataError) {
+        console.error('Error sending end call via data connection:', dataError);
+        // Continue with cleanup even if the data connection fails
+      }
     }
+    
+    let apiCallSuccessful = true;
     
     // Notify the API that the call has been ended by the officer
     if (currentKioskId !== null) {
@@ -363,12 +375,22 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
           })
         });
         
-        if (response.ok) {
+        if (!response.ok) {
+          // Handle non-200 responses
+          const errorData = await response.text();
+          console.error('API returned error:', response.status, errorData);
+          apiCallSuccessful = false;
+          setToast({ 
+            open: true, 
+            message: `Error ending call (${response.status})`, 
+            severity: 'error' 
+          });
+        } else {
           console.log('Successfully notified API that officer ended call');
           
           // Also update active call status
           try {
-            await fetch(`http://localhost:5173/api/active-calls/${currentKioskId}/${id}`, {
+            const statusResponse = await fetch(`http://localhost:5173/api/active-calls/${currentKioskId}/${id}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -378,34 +400,83 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
                 endTimestamp: new Date().toISOString()
               })
             });
+            
+            if (!statusResponse.ok) {
+              const statusErrorData = await statusResponse.text();
+              console.error('Error updating call status:', statusResponse.status, statusErrorData);
+              // Don't set apiCallSuccessful to false here as the main end-call API succeeded
+            }
           } catch (endError) {
             console.error('Error updating active call status:', endError);
+            // Main API call was successful, so we can still proceed
           }
         }
       } catch (error) {
         console.error('Failed to notify API about call end:', error);
+        apiCallSuccessful = false;
+        setToast({ 
+          open: true, 
+          message: 'Network error when ending call', 
+          severity: 'error' 
+        });
       }
     }
     
+    // Always clean up the call resources, even if API calls failed
     cleanup();
+    
+    // Update UI state after cleanup
+    setStatus('Call ended by officer');
+    
+    // Only show success message if API calls were successful
+    if (apiCallSuccessful) {
+      setToast({ 
+        open: true, 
+        message: 'Call ended successfully', 
+        severity: 'info' 
+      });
+    }
   };
 
   const cleanup = () => {
+    // Close the media call properly if it exists
     if (currentCall) {
-      currentCall.close();
+      try {
+        currentCall.close();
+        console.log('Media call connection closed');
+      } catch (err) {
+        console.error('Error closing media call:', err);
+      }
     }
     
+    // Stop remote video stream
     if (remoteVideoRef.current?.srcObject) {
-      const remoteStream = remoteVideoRef.current.srcObject as MediaStream;
-      remoteStream.getTracks().forEach(track => track.stop());
-      remoteVideoRef.current.srcObject = null;
+      try {
+        const remoteStream = remoteVideoRef.current.srcObject as MediaStream;
+        remoteStream.getTracks().forEach(track => {
+          track.stop();
+          console.log('Remote track stopped:', track.kind);
+        });
+        remoteVideoRef.current.srcObject = null;
+      } catch (err) {
+        console.error('Error stopping remote tracks:', err);
+      }
     }
     
+    // Stop local video/audio tracks
     if (localStream) {
-      localStream.getTracks().forEach(track => track.stop());
-      setLocalStream(null);
+      try {
+        localStream.getTracks().forEach(track => {
+          track.stop();
+          console.log('Local track stopped:', track.kind);
+        });
+        setLocalStream(null);
+      } catch (err) {
+        console.error('Error stopping local tracks:', err);
+      }
     }
     
+    // Clear the call timer
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
@@ -413,14 +484,24 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
     
     // Close data connection if open
     if (dataConnectionRef.current) {
-      dataConnectionRef.current.close();
-      dataConnectionRef.current = null;
+      try {
+        if (dataConnectionRef.current.open) {
+          dataConnectionRef.current.close();
+          console.log('Data connection closed');
+        }
+        dataConnectionRef.current = null;
+      } catch (err) {
+        console.error('Error closing data connection:', err);
+      }
     }
     
+    // Reset all state related to the call
     setCurrentCall(null);
     setIncomingCall(null);
     setCurrentKioskId(null);
     setCallDuration(0); // Reset call duration when cleaning up
+    
+    // Update status to show we're ready for the next call
     setStatus('Online - Waiting for incoming calls');
   };
 
