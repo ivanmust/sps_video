@@ -28,10 +28,6 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null); // Interval reference
   const [pendingCallsCheckerActive, setPendingCallsCheckerActive] = useState(false);
   const [currentKioskId, setCurrentKioskId] = useState<number | null>(null);
-  
-  // New state for tracking how long an incoming call has been pending
-  const [incomingCallWaitTime, setIncomingCallWaitTime] = useState(0);
-  const incomingCallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Poll for pending calls from the API as an alternative connection method
   useEffect(() => {
@@ -139,26 +135,6 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       setIncomingCall(incoming);
       setStatus('Incoming call from kiosk...');
       
-      // Reset incoming call timer
-      setIncomingCallWaitTime(0);
-      
-      // Start the timer for auto-decline
-      if (incomingCallTimerRef.current) {
-        clearInterval(incomingCallTimerRef.current);
-      }
-      
-      incomingCallTimerRef.current = setInterval(() => {
-        setIncomingCallWaitTime(prev => {
-          const newTime = prev + 1;
-          // Auto-decline if the call has been waiting for 30 seconds
-          if (newTime >= 30) {
-            declineCall();
-            return 0;
-          }
-          return newTime;
-        });
-      }, 1000);
-      
       // Auto-answer option
       if (true) { // Set this to a config option if you want
         acceptCall();
@@ -219,51 +195,6 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       cleanup();
     };
   }, [id]);
-  
-  // New function to handle declining a call
-  const declineCall = () => {
-    if (incomingCall) {
-      console.log('Auto-declining call after 30 seconds of no response');
-      incomingCall.close();
-      setIncomingCall(null);
-      setStatus('Call auto-declined after 30 seconds');
-      setToast({ 
-        open: true, 
-        message: 'Call auto-declined after 30 seconds of no response', 
-        severity: 'info' 
-      });
-      
-      // Clear the incoming call timer
-      if (incomingCallTimerRef.current) {
-        clearInterval(incomingCallTimerRef.current);
-        incomingCallTimerRef.current = null;
-      }
-      
-      // Reset wait time
-      setIncomingCallWaitTime(0);
-      
-      // Notify API that the call was declined (if needed)
-      if (currentKioskId !== null) {
-        try {
-          fetch('http://localhost:5173/api/end-call', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              kioskId: currentKioskId,
-              officerId: id,
-              endedBy: 'officer',
-              reason: 'auto-declined',
-              timestamp: new Date().toISOString()
-            })
-          });
-        } catch (error) {
-          console.error('Failed to notify API about auto-declined call:', error);
-        }
-      }
-    }
-  };
 
   // Function to prepare media and auto-answer when a call is detected through API
   const prepareAndAutoAnswer = async () => {
@@ -291,15 +222,6 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       console.log('No incoming call to accept');
       return;
     }
-
-    // Clear the incoming call timer
-    if (incomingCallTimerRef.current) {
-      clearInterval(incomingCallTimerRef.current);
-      incomingCallTimerRef.current = null;
-    }
-    
-    // Reset wait time
-    setIncomingCallWaitTime(0);
 
     try {
       console.log('Accepting incoming call...');
@@ -420,16 +342,11 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
-    if (incomingCallTimerRef.current) {
-      clearInterval(incomingCallTimerRef.current);
-      incomingCallTimerRef.current = null;
-    }
     
     setCurrentCall(null);
     setIncomingCall(null);
     setCurrentKioskId(null);
     setCallDuration(0); // Reset call duration when cleaning up
-    setIncomingCallWaitTime(0); // Reset incoming call wait time
     setStatus('Online - Waiting for incoming calls');
   };
 
@@ -601,9 +518,6 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
               <Typography variant="h5" sx={{ color: 'white', mb: 2 }}>
                 Incoming call from Kiosk {currentKioskId || '...'}
               </Typography>
-              <Typography variant="body2" sx={{ color: '#94a3b8', mb: 3 }}>
-                Auto-decline in {30 - incomingCallWaitTime} seconds
-              </Typography>
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <Button 
                   variant="contained" 
@@ -619,12 +533,6 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
                     incomingCall.close();
                     setIncomingCall(null);
                     setStatus('Call rejected');
-                    // Clear the incoming call timer
-                    if (incomingCallTimerRef.current) {
-                      clearInterval(incomingCallTimerRef.current);
-                      incomingCallTimerRef.current = null;
-                    }
-                    setIncomingCallWaitTime(0);
                   }}
                 >
                   Reject
