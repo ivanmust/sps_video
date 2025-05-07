@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, FC, useCallback } from 'react';
 import { Box, Typography, Snackbar, Alert, Button } from '@mui/material';
-import Peer, { MediaConnection } from 'peerjs';
+import Peer, { MediaConnection, DataConnection } from 'peerjs';
 
 interface OfficerProps {
   id: number;
@@ -24,6 +24,7 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
   const [currentCall, setCurrentCall] = useState<MediaConnection | null>(null);
   const [incomingCall, setIncomingCall] = useState<MediaConnection | null>(null);
   const peerRef = useRef<Peer | null>(null);
+  const dataConnectionRef = useRef<DataConnection | null>(null);
   const [callDuration, setCallDuration] = useState(0); // Call duration in seconds
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null); // Interval reference
   const [pendingCallsCheckerActive, setPendingCallsCheckerActive] = useState(false);
@@ -144,6 +145,9 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
     peer.on('connection', (conn) => {
       console.log('Incoming data connection:', conn);
       
+      // Store the data connection for later use
+      dataConnectionRef.current = conn;
+      
       // Try to extract kiosk ID from the connection metadata or peer ID
       if (conn.metadata && conn.metadata.kioskId) {
         setCurrentKioskId(conn.metadata.kioskId);
@@ -160,6 +164,16 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
         if (data === 'CALL_REQUEST') {
           setStatus('Call request received from kiosk...');
         }
+      });
+
+      conn.on('close', () => {
+        console.log('Data connection closed');
+        dataConnectionRef.current = null;
+      });
+
+      conn.on('error', (err) => {
+        console.error('Data connection error:', err);
+        dataConnectionRef.current = null;
       });
     });
 
@@ -196,6 +210,38 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
     };
   }, [id]);
 
+  // Function to establish a data connection to the kiosk
+  const connectToKiosk = useCallback((kioskId: number) => {
+    if (!peerRef.current) {
+      console.error('PeerJS instance not available');
+      return;
+    }
+    
+    // Create a deterministic peer ID based on the kiosk ID
+    const kioskPeerId = `kiosk-${kioskId}`;
+    console.log('Attempting to establish data connection with:', kioskPeerId);
+    
+    const dataConn = peerRef.current.connect(kioskPeerId, {
+      reliable: true,
+      metadata: { officerId: id }
+    });
+    
+    dataConnectionRef.current = dataConn;
+    
+    dataConn.on('open', () => {
+      console.log('Data connection established with kiosk:', kioskId);
+      setToast({ open: true, message: 'Data channel connected ✅', severity: 'success' });
+      
+      // Send initial message to confirm connection
+      dataConn.send({ type: 'OFFICER_CONNECTED', officerId: id, timestamp: new Date().toISOString() });
+    });
+    
+    dataConn.on('error', (err) => {
+      console.error('Data connection error:', err);
+      dataConnectionRef.current = null;
+    });
+  }, [id]);
+
   // Function to prepare media and auto-answer when a call is detected through API
   const prepareAndAutoAnswer = async () => {
     try {
@@ -209,6 +255,11 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       // If there's already an incoming call waiting, answer it
       if (incomingCall) {
         acceptCall();
+      }
+      
+      // If we know the kiosk ID, establish a data connection too
+      if (currentKioskId !== null && !dataConnectionRef.current) {
+        connectToKiosk(currentKioskId);
       }
     } catch (err) {
       console.error('Failed to prepare media for auto-answer:', err);
@@ -245,6 +296,11 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
         setCallDuration((prev) => prev + 1);
       }, 1000);
 
+      // If we know the kiosk ID but don't have a data connection yet, establish one
+      if (currentKioskId !== null && !dataConnectionRef.current) {
+        connectToKiosk(currentKioskId);
+      }
+
       // Listen for the remote stream
       incomingCall.on('stream', (remoteStream: MediaStream) => {
         console.log('Received remote stream', remoteStream);
@@ -276,11 +332,20 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       setStatus('Error accessing media devices');
       setToast({ open: true, message: 'Failed to access camera/microphone ❌', severity: 'error' });
     }
-  }, [incomingCall, localStream]);
+  }, [incomingCall, localStream, currentKioskId, connectToKiosk]);
 
   const endCall = async () => {
     setStatus('Call ended by officer');
     setToast({ open: true, message: 'Call ended', severity: 'info' });
+    
+    // Send message through data connection if available
+    if (dataConnectionRef.current && dataConnectionRef.current.open) {
+      dataConnectionRef.current.send({ 
+        type: 'CALL_END', 
+        timestamp: new Date().toISOString(), 
+        endedBy: 'officer' 
+      });
+    }
     
     // Notify the API that the call has been ended by the officer
     if (currentKioskId !== null) {
@@ -329,18 +394,27 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
     if (currentCall) {
       currentCall.close();
     }
+    
     if (remoteVideoRef.current?.srcObject) {
       const remoteStream = remoteVideoRef.current.srcObject as MediaStream;
-      remoteStream.getTracks().forEach((track) => track.stop());
+      remoteStream.getTracks().forEach(track => track.stop());
       remoteVideoRef.current.srcObject = null;
     }
+    
     if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
+      localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
     }
+    
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
+    }
+    
+    // Close data connection if open
+    if (dataConnectionRef.current) {
+      dataConnectionRef.current.close();
+      dataConnectionRef.current = null;
     }
     
     setCurrentCall(null);
