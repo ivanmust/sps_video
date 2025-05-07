@@ -3,6 +3,7 @@ import { Button, Box, Typography, Paper, Stack } from '@mui/material';
 import Peer, { MediaConnection } from 'peerjs';
 import { Phone } from 'lucide-react';
 
+
 const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: number }> = ({ cases, kioskId }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [call, setCall] = useState<MediaConnection | null>(null);
@@ -511,3 +512,4 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
 };
 
 export default Caller;
+
