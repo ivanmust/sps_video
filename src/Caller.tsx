@@ -1,11 +1,6 @@
 import { useState, useEffect, useRef, FC, useCallback } from 'react';
-import { Button, Box, Typography, Paper, Stack } from '@mui/material';
+import { Box, Typography, Paper } from '@mui/material';
 import Peer, { MediaConnection } from 'peerjs';
-import { Phone } from 'lucide-react';
-import PropTypes from 'prop-types';
-
-
-
 
 const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: number }> = ({ cases, kioskId }) => {
   const [peer, setPeer] = useState<Peer | null>(null);
@@ -83,6 +78,14 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
           console.warn(`Invalid officer ID for this kiosk: ${officerId}`);
         }
       }
+      
+      // Handle call termination request from parent
+      if (event.data && event.data.type === 'END_CALL') {
+        if (call) {
+          call.close();
+          handleCallEnded();
+        }
+      }
     };
     
     // Add the event listener to catch messages from any source
@@ -92,7 +95,7 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
     return () => {
       window.removeEventListener('message', handleMessage);
     };
-  }, [kioskId]);
+  }, [kioskId, call]);
 
   // Check API endpoints for call requests
   useEffect(() => {
@@ -192,7 +195,7 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
 
     // Reset UI to initial state after a short delay
     setTimeout(() => {
-      setStatus('Ready - Select an officer to call');
+      setStatus('Ready - Waiting for call');
     }, 1000);
     
     // Notify parent window if needed
@@ -312,23 +315,7 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
       }
       return false;
     };
-    
-    // Handle call termination request from parent
-    const handleParentMessage = (event: MessageEvent) => {
-      if (event.data && event.data.type === 'END_CALL') {
-        if (call) {
-          call.close();
-          handleCallEnded();
-        }
-      }
-    };
-    
-    window.addEventListener('message', handleParentMessage);
-    
-    return () => {
-      window.removeEventListener('message', handleParentMessage);
-    };
-  }, [allowedReceivers, call, handleCallEnded]);
+  }, [allowedReceivers]);
 
   return (
     <Box sx={{ 
@@ -438,81 +425,9 @@ const Caller: FC<{ cases: { name: string; assignedTo: number }[]; kioskId: numbe
             </Box>
           )}
         </Box>
-
-        {/* Controls - Officer Buttons */}
-        {!call ? (
-          <Stack 
-            ref={controlsRef} 
-            direction={{ xs: 'column', sm: 'row' }} 
-            spacing={{ xs: 1, sm: 1.5 }} 
-            sx={{
-              position: 'absolute',
-              bottom: { xs: 16, sm: 20, md: 24 },
-              left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              justifyContent: 'center',
-              width: { xs: '90%', sm: 'auto' },
-            }}
-          >
-            {allowedReceivers.map((officerId) => {
-              const officerData = cases.find(c => c.assignedTo === officerId);
-              
-              return (
-                <Button
-                  key={officerId}
-                  variant="contained"
-                  color="primary"
-                  onClick={() => handleOfficerSelect(officerId)}
-                  startIcon={<Phone />}
-                  disabled={!!call}
-                  sx={{
-                    px: { xs: 2, sm: 3 },
-                    py: { xs: 1, sm: 1.5 },
-                    bgcolor: '#3b82f6',
-                    '&:hover': {
-                      bgcolor: '#2563eb',
-                    },
-                    whiteSpace: 'nowrap',
-                    minWidth: { xs: '100%', sm: '120px' },
-                  }}
-                >
-                  {officerData?.name || `Officer ${officerId}`}
-                </Button>
-              );
-            })}
-          </Stack>
-        ) : (
-          <Button
-            variant="contained"
-            color="error"
-            onClick={() => {
-              if (call) {
-                call.close();
-                handleCallEnded();
-              }
-            }}
-            startIcon={<Phone />}
-            sx={{
-              position: 'absolute',
-              bottom: { xs: 16, sm: 20, md: 24 },
-              left: '50%',
-              transform: 'translateX(-50%)',
-              px: { xs: 2, sm: 3 },
-              py: { xs: 1, sm: 1.5 },
-              bgcolor: '#ef4444',
-              '&:hover': {
-                bgcolor: '#dc2626',
-              }
-            }}
-          >
-            End Call
-          </Button>
-        )}
       </Box>
     </Box>
   );
 };
 
 export default Caller;
-
