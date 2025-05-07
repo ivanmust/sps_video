@@ -27,6 +27,11 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
   const [callDuration, setCallDuration] = useState(0); // Call duration in seconds
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null); // Interval reference
   const [pendingCallsCheckerActive, setPendingCallsCheckerActive] = useState(false);
+  const [currentKioskId, setCurrentKioskId] = useState<number | null>(null);
+  
+  // New state for tracking how long an incoming call has been pending
+  const [incomingCallWaitTime, setIncomingCallWaitTime] = useState(0);
+  const incomingCallTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Poll for pending calls from the API as an alternative connection method
   useEffect(() => {
@@ -39,12 +44,13 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
             
             // Find any pending call for this officer
             const callForThisOfficer = pendingCalls.find(
-              (              call: { officerId: number; processed: any; }) => call.officerId === id && !call.processed
+              (call: { officerId: number; processed: any; kioskId: number }) => call.officerId === id && !call.processed
             );
             
             if (callForThisOfficer) {
               console.log('Pending call found via API polling:', callForThisOfficer);
               setStatus(`Incoming call from kiosk #${callForThisOfficer.kioskId}...`);
+              setCurrentKioskId(callForThisOfficer.kioskId);
               setToast({ 
                 open: true, 
                 message: `Incoming call detected for Officer #${id}`, 
@@ -118,8 +124,40 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
 
     peer.on('call', (incoming) => {
       console.log('Incoming call detected!', incoming);
+      
+      // Try to extract kiosk ID from the call metadata or peer ID
+      if (incoming.metadata && incoming.metadata.kioskId) {
+        setCurrentKioskId(incoming.metadata.kioskId);
+      } else {
+        // Try to extract from peer ID (e.g., kiosk-1-abc123)
+        const kioskIdMatch = incoming.peer.match(/kiosk-(\d+)/);
+        if (kioskIdMatch && kioskIdMatch[1]) {
+          setCurrentKioskId(parseInt(kioskIdMatch[1]));
+        }
+      }
+      
       setIncomingCall(incoming);
       setStatus('Incoming call from kiosk...');
+      
+      // Reset incoming call timer
+      setIncomingCallWaitTime(0);
+      
+      // Start the timer for auto-decline
+      if (incomingCallTimerRef.current) {
+        clearInterval(incomingCallTimerRef.current);
+      }
+      
+      incomingCallTimerRef.current = setInterval(() => {
+        setIncomingCallWaitTime(prev => {
+          const newTime = prev + 1;
+          // Auto-decline if the call has been waiting for 30 seconds
+          if (newTime >= 30) {
+            declineCall();
+            return 0;
+          }
+          return newTime;
+        });
+      }, 1000);
       
       // Auto-answer option
       if (true) { // Set this to a config option if you want
@@ -130,9 +168,20 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
     peer.on('connection', (conn) => {
       console.log('Incoming data connection:', conn);
       
+      // Try to extract kiosk ID from the connection metadata or peer ID
+      if (conn.metadata && conn.metadata.kioskId) {
+        setCurrentKioskId(conn.metadata.kioskId);
+      } else {
+        // Try to extract from peer ID (e.g., kiosk-1-abc123)
+        const kioskIdMatch = conn.peer.match(/kiosk-(\d+)/);
+        if (kioskIdMatch && kioskIdMatch[1]) {
+          setCurrentKioskId(parseInt(kioskIdMatch[1]));
+        }
+      }
+      
       conn.on('data', (data) => {
         console.log('Received data:', data);
-        if (data  === 'CALL_REQUEST') {
+        if (data === 'CALL_REQUEST') {
           setStatus('Call request received from kiosk...');
         }
       });
@@ -170,6 +219,51 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       cleanup();
     };
   }, [id]);
+  
+  // New function to handle declining a call
+  const declineCall = () => {
+    if (incomingCall) {
+      console.log('Auto-declining call after 30 seconds of no response');
+      incomingCall.close();
+      setIncomingCall(null);
+      setStatus('Call auto-declined after 30 seconds');
+      setToast({ 
+        open: true, 
+        message: 'Call auto-declined after 30 seconds of no response', 
+        severity: 'info' 
+      });
+      
+      // Clear the incoming call timer
+      if (incomingCallTimerRef.current) {
+        clearInterval(incomingCallTimerRef.current);
+        incomingCallTimerRef.current = null;
+      }
+      
+      // Reset wait time
+      setIncomingCallWaitTime(0);
+      
+      // Notify API that the call was declined (if needed)
+      if (currentKioskId !== null) {
+        try {
+          fetch('http://localhost:5173/api/end-call', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              kioskId: currentKioskId,
+              officerId: id,
+              endedBy: 'officer',
+              reason: 'auto-declined',
+              timestamp: new Date().toISOString()
+            })
+          });
+        } catch (error) {
+          console.error('Failed to notify API about auto-declined call:', error);
+        }
+      }
+    }
+  };
 
   // Function to prepare media and auto-answer when a call is detected through API
   const prepareAndAutoAnswer = async () => {
@@ -197,6 +291,15 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       console.log('No incoming call to accept');
       return;
     }
+
+    // Clear the incoming call timer
+    if (incomingCallTimerRef.current) {
+      clearInterval(incomingCallTimerRef.current);
+      incomingCallTimerRef.current = null;
+    }
+    
+    // Reset wait time
+    setIncomingCallWaitTime(0);
 
     try {
       console.log('Accepting incoming call...');
@@ -253,11 +356,50 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
     }
   }, [incomingCall, localStream]);
 
-  
-
-  const endCall = () => {
-    setStatus('Call ended');
+  const endCall = async () => {
+    setStatus('Call ended by officer');
     setToast({ open: true, message: 'Call ended', severity: 'info' });
+    
+    // Notify the API that the call has been ended by the officer
+    if (currentKioskId !== null) {
+      try {
+        const response = await fetch('http://localhost:5173/api/end-call', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            kioskId: currentKioskId,
+            officerId: id,
+            endedBy: 'officer',
+            timestamp: new Date().toISOString()
+          })
+        });
+        
+        if (response.ok) {
+          console.log('Successfully notified API that officer ended call');
+          
+          // Also update active call status
+          try {
+            await fetch(`http://localhost:5173/api/active-calls/${currentKioskId}/${id}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                status: 'ended',
+                endTimestamp: new Date().toISOString()
+              })
+            });
+          } catch (endError) {
+            console.error('Error updating active call status:', endError);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to notify API about call end:', error);
+      }
+    }
+    
     cleanup();
   };
 
@@ -278,10 +420,16 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
+    if (incomingCallTimerRef.current) {
+      clearInterval(incomingCallTimerRef.current);
+      incomingCallTimerRef.current = null;
+    }
     
     setCurrentCall(null);
     setIncomingCall(null);
+    setCurrentKioskId(null);
     setCallDuration(0); // Reset call duration when cleaning up
+    setIncomingCallWaitTime(0); // Reset incoming call wait time
     setStatus('Online - Waiting for incoming calls');
   };
 
@@ -315,205 +463,222 @@ const OfficerReceiver: FC<OfficerProps> = ({ id, name = "", rank = "", caseItem:
           <Box component="img" 
             src="/logo.png" 
             alt="Logo" 
-            sx={{ 
-              height: '32px', 
-              width: 'auto', 
-              borderRadius: '50%',
-              bgcolor: '#1e293b'
-            }} 
+            sx={{ height: 40 }}
           />
-          <Box>
-            <Typography variant="h6" sx={{ color: '#ffffff', fontWeight: 600 }}>
-              OFFICER RECEIVER
-            </Typography>
-            <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-              Status: {status}
-            </Typography>
-          </Box>
-        </Box>
-        
-        <Box sx={{ textAlign: 'right' }}>
-          <Typography variant="body1" sx={{ color: '#ffffff', fontWeight: 500 }}>
-            {name}
+          <Typography variant="h5" sx={{ color: 'white', fontWeight: 600 }}>
+            Officer Console
           </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ 
+            width: 10, 
+            height: 10, 
+            borderRadius: '50%',
+            bgcolor: currentCall ? '#22c55e' : '#f59e0b',
+            boxShadow: currentCall ? '0 0 8px #22c55e' : 'none'
+          }} />
           <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-            {rank} • ID #{id}
+            {status}
           </Typography>
         </Box>
       </Box>
 
-     {/* Main Content - Video Area */}
-     <Box sx={{ 
-        flex: 1, 
-        display: 'flex', 
-        p: { xs: 1, sm: 1.5, md: 2 }, 
-        position: 'relative', 
-        bgcolor: '#1e293b', 
-        height: 'calc(100vh - 50px)' // Adjusted based on header height
+      {/* Main Content */}
+      <Box sx={{ 
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        p: 3,
+        position: 'relative',
       }}>
-      
-        {/* Video Container */}
+        {/* Officer Info Card */}
         <Box sx={{
-          width: '100%',
-          height: '100%',
-          overflow: 'hidden',
+          bgcolor: 'rgba(15, 23, 42, 0.5)',
           borderRadius: 2,
-          position: 'relative',
-          bgcolor: '#0f172a',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
+          p: 3,
+          mb: 3,
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(148, 163, 184, 0.1)',
         }}>
-          {!currentCall && !incomingCall && (
-            <>
-              {/* Officer Badge/Logo */}
-              <Box 
-                component="img"
-                src="/logo.png"
-                alt="Officer Badge"
-                sx={{
-                  width: '120px',
-                  height: '120px',
-                  borderRadius: '50%',
-                  mb: 3
-                }}
-              />
-              
-              <Typography variant="h5" sx={{ color: '#94a3b8', mb: 4 }}>
-                Waiting for incoming calls
-              </Typography>
-              
-              <Box sx={{
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Box 
+              component="div"
+              sx={{
+                width: 64,
+                height: 64,
+                borderRadius: '50%',
+                bgcolor: '#1e293b',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                p: 4,
-                borderRadius: 2,
-                border: '1px solid rgba(148, 163, 184, 0.2)',
-                width: '100%',
-                maxWidth: '400px',
-                gap: 2
+                mr: 2
+              }}
+            >
+              <Typography variant="h4" sx={{ color: '#64748b' }}>
+                {name ? name[0] : id}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="h6" sx={{ color: 'white' }}>
+                {name || `Officer #${id}`}
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+                {rank || 'Police Officer'}
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Video Stream Container */}
+        <Box sx={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: 'rgba(15, 23, 42, 0.5)',
+          borderRadius: 2,
+          p: 3,
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(148, 163, 184, 0.1)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}>
+          {currentCall ? (
+            <>
+              <video 
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  borderRadius: '8px',
+                }}
+              />
+              <Box sx={{
+                position: 'absolute',
+                bottom: 16,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                bgcolor: 'rgba(15, 23, 42, 0.75)',
+                borderRadius: 20,
+                p: 1,
+                px: 3,
+                backdropFilter: 'blur(5px)',
               }}>
-                <Box sx={{ 
-                  width: '12px', 
-                  height: '12px', 
-                  borderRadius: '50%', 
-                  bgcolor: '#10b981',
-                  animation: 'pulse 2s infinite'
-                }} />
-                <Typography sx={{ color: '#94a3b8' }}>
-                  Your officer ID is <strong style={{ color: '#ffffff' }}>{id}</strong>
+                <Typography variant="body2" sx={{ color: 'white' }}>
+                  Call duration: {formatCallDuration(callDuration)}
                 </Typography>
+                <Button 
+                  variant="contained" 
+                  color="error"
+                  onClick={endCall}
+                  sx={{ 
+                    borderRadius: 20,
+                    minWidth: 'unset',
+                    width: 40,
+                    height: 40,
+                    p: 0,
+                  }}
+                >
+                  <Box component="span" sx={{ fontSize: 18 }}>✕</Box>
+                </Button>
               </Box>
             </>
-          )}
-
-          {/* Video Element (hidden until call) */}
-          <video 
-            ref={remoteVideoRef} 
-            autoPlay 
-            playsInline 
-            style={{ 
-              position: 'absolute', 
-              top: 0, 
-              left: 0, 
-              width: '100%', 
-              height: '100%', 
-              objectFit: 'contain', 
-              display: currentCall ? 'block' : 'none'
-            }} 
-          />
-
-          {/* Incoming Call Controls */}
-          {incomingCall && (
+          ) : incomingCall ? (
             <Box sx={{
-              position: 'absolute',
-              bottom: '50%',
-              left: '50%',
-              transform: 'translate(-50%, 50%)',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: 4,
-              backgroundColor: 'rgba(15, 23, 42, 0.9)',
-              p: 4,
-              borderRadius: 2,
-              width: '90%',
-              maxWidth: '400px'
+              justifyContent: 'center',
             }}>
-              <Typography variant="h5" sx={{ color: '#ffffff' }}>
-                Incoming Call from Kiosk
+              <Typography variant="h5" sx={{ color: 'white', mb: 2 }}>
+                Incoming call from Kiosk {currentKioskId || '...'}
               </Typography>
-              
+              <Typography variant="body2" sx={{ color: '#94a3b8', mb: 3 }}>
+                Auto-decline in {30 - incomingCallWaitTime} seconds
+              </Typography>
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <Button
-                  variant="contained"
+                <Button 
+                  variant="contained" 
                   color="success"
                   onClick={acceptCall}
-                  sx={{ px: 4, py: 1.5 }}
                 >
-                  Accept
+                  Accept Call
                 </Button>
-                
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={() => {
+                    incomingCall.close();
+                    setIncomingCall(null);
+                    setStatus('Call rejected');
+                    // Clear the incoming call timer
+                    if (incomingCallTimerRef.current) {
+                      clearInterval(incomingCallTimerRef.current);
+                      incomingCallTimerRef.current = null;
+                    }
+                    setIncomingCallWaitTime(0);
+                  }}
+                >
+                  Reject
+                </Button>
               </Box>
             </Box>
-          )}
-
-          {/* Active Call Controls */}
-          {currentCall && (
+          ) : (
             <Box sx={{
-              position: 'absolute',
-              bottom: 20,
-              left: '50%',
-              transform: 'translateX(-50%)',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: 2,
+              justifyContent: 'center',
+              height: '100%',
             }}>
-              <Typography sx={{ color: '#ffffff', fontSize: '18px', fontWeight: 'bold' }}>
-                {formatCallDuration(callDuration)}
+              <Typography variant="h6" sx={{ color: '#94a3b8', mb: 2, textAlign: 'center' }}>
+                Waiting for incoming calls
               </Typography>
-
-              <Button
-                variant="contained"
-                color="error"
-                onClick={endCall}
-                sx={{ px: 4, py: 1.5 }}
-              >
-                End Call
-              </Button>
+              <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', maxWidth: 400 }}>
+                You will be automatically connected when a citizen initiates a call from a kiosk.
+              </Typography>
             </Box>
           )}
         </Box>
       </Box>
 
-      {/* CSS Keyframes for pulsing dot */}
-      <style>
-        {`
-          @keyframes pulse {
-            0% {
-              box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-            }
-            70% {
-              box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
-            }
-            100% {
-              box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-            }
-          }
-        `}
-      </style>
+      {/* Footer */}
+      <Box sx={{
+        p: 2,
+        bgcolor: '#0f172a',
+        borderTop: '1px solid rgba(148, 163, 184, 0.2)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <Typography variant="body2" sx={{ color: '#64748b' }}>
+          Officer ID: {id}
+        </Typography>
+        <Typography variant="body2" sx={{ color: '#64748b' }}>
+          {new Date().toLocaleTimeString()}
+        </Typography>
+      </Box>
 
-      {/* Toast Notifications */}
+      {/* Toast notifications */}
       <Snackbar 
         open={toast.open} 
-        autoHideDuration={3000} 
-        onClose={() => setToast((prev) => ({ ...prev, open: false }))} 
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        autoHideDuration={6000} 
+        onClose={() => setToast({ ...toast, open: false })}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <Alert severity={toast.severity} sx={{ width: '100%' }}>
+        <Alert 
+          onClose={() => setToast({ ...toast, open: false })} 
+          severity={toast.severity}
+          sx={{ width: '100%' }}
+        >
           {toast.message}
         </Alert>
       </Snackbar>
